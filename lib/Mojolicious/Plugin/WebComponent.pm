@@ -4,7 +4,7 @@ use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Data::Dumper;
 
-our $VERSION = "0.03";
+our $VERSION = "0.04";
 
 sub register($self, $app, $conf) {
 
