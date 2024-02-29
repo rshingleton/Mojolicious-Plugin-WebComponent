@@ -1,9 +1,10 @@
 package Mojolicious::Plugin::WebComponent;
+use v5.18;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Data::Dumper;
 
-our $VERSION = "0.02";
+our $VERSION = "0.03";
 
 sub register($self, $app, $conf) {
 

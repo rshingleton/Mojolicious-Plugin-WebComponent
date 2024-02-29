@@ -42,7 +42,8 @@
       },
       "runtime" : {
          "requires" : {
-            "Mojolicious" : "0"
+            "Mojolicious" : "0",
+            "perl" : "v5.18.0"
          }
       }
    },
@@ -58,7 +59,7 @@
          "web" : "https://github.com/rshingleton/Mojolicious-Plugin-WebComponent"
       }
    },
-   "version" : "0.02",
+   "version" : "0.03",
    "x_contributors" : [
       "shingler <shingler@oclc.org>"
    ],
