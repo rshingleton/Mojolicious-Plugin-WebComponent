@@ -29,3 +29,6 @@ cover_db/
 MYMETA.*
 
 /Mojolicious-Plugin-WebComponent-*
+/.idea/
+/_Deparsed_XSubs.pm
+un

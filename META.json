@@ -1,7 +1,7 @@
 {
-   "abstract" : "It's new $module",
+   "abstract" : "An effort to make creating and using custom web components easier",
    "author" : [
-      "shingler <shingler@oclc.org>"
+      "Russell Shingleton <reshingleton@gmail.com>"
    ],
    "dynamic_config" : 0,
    "generated_by" : "Minilla/v3.1.23, CPAN::Meta::Converter version 2.150010",
@@ -42,17 +42,26 @@
       },
       "runtime" : {
          "requires" : {
-            "perl" : "5.008001"
-         }
-      },
-      "test" : {
-         "requires" : {
-            "Test::More" : "0.98"
+            "Mojolicious" : "0"
          }
       }
    },
    "release_status" : "unstable",
+   "resources" : {
+      "bugtracker" : {
+         "web" : "https://github.com/rshingleton/Mojolicious-Plugin-WebComponent/issues"
+      },
+      "homepage" : "https://github.com/rshingleton/Mojolicious-Plugin-WebComponent",
+      "repository" : {
+         "type" : "git",
+         "url" : "https://github.com/rshingleton/Mojolicious-Plugin-WebComponent.git",
+         "web" : "https://github.com/rshingleton/Mojolicious-Plugin-WebComponent"
+      }
+   },
    "version" : "0.01",
+   "x_contributors" : [
+      "shingler <shingler@oclc.org>"
+   ],
    "x_serialization_backend" : "JSON::PP version 4.07",
    "x_static_install" : 1
 }
