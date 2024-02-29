@@ -1,5 +1,5 @@
 package Mojolicious::Plugin::WebComponent;
-use v5.18;
+use v5.20;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Data::Dumper;
