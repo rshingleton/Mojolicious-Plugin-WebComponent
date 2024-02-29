@@ -1,10 +1,7 @@
-use lib './lib';
 use Test::Mojo;
 use Test::More;
 use Mojolicious::Lite -signatures;
 use Mojolicious::Plugin::WebComponent;
-use Carp;
-use Data::Dumper;
 
 $ENV{MOJO_MODE} = 'test';
 

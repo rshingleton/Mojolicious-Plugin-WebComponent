@@ -3,7 +3,7 @@ use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Data::Dumper;
 
-our $VERSION = "0.01";
+our $VERSION = "0.02";
 
 sub register($self, $app, $conf) {
 
@@ -53,10 +53,10 @@ sub register($self, $app, $conf) {
             # If the template file was not found, show it
             $tmplHtml //= "<div>404 -  $template template not found</div>";
 
-            $tmpl = <<~_CONTENT;
+            $tmpl = qq{_CONTENT;
                     let tmpl = document.createElement('template');
                     tmpl.innerHTML = `$tmplHtml`
-            _CONTENT
+            };
         }
 
         # my $publicPath = $app->static->{paths}->[0];
@@ -87,7 +87,11 @@ sub register($self, $app, $conf) {
 }
 
 sub _component {
-    my ($self, $path, $c, $name, $opts) = @_;
+    my $self = shift;
+    my $path = shift;
+    my $c = shift;
+    my $name = shift;
+    my $opts = shift;
 
     if (exists($opts->{template})) {
         my $template = defined($opts->{template}) ? $opts->{template} : 'false';
@@ -228,6 +232,7 @@ The base application is taking advantage of L<Mojolicious::Plugin::WebComponent>
             </title>
 
             %= asset "app.css"
+            %= asset "deferred.js", defer => undef
             %= asset "app.js"
 
             %= component 'system-hosts'

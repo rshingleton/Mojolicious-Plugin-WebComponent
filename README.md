@@ -103,6 +103,7 @@ The base application is taking advantage of [Mojolicious::Plugin::WebComponent](
             </title>
 
             %= asset "app.css"
+            %= asset "deferred.js", defer => undef
             %= asset "app.js"
 
             %= component 'system-hosts'
