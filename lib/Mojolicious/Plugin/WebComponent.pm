@@ -4,7 +4,7 @@ use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Data::Dumper;
 
-our $VERSION = "0.05";
+our $VERSION = "0.06";
 
 sub register($self, $app, $conf) {
 
@@ -54,7 +54,7 @@ sub register($self, $app, $conf) {
             # If the template file was not found, show it
             $tmplHtml //= "<div>404 -  $template template not found</div>";
 
-            $tmpl = qq{_CONTENT;
+            $tmpl = qq{
                     let tmpl = document.createElement('template');
                     tmpl.innerHTML = `$tmplHtml`
             };
