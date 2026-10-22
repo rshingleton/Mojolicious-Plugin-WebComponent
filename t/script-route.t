@@ -249,6 +249,24 @@ is $alt->app->component('alt-box', {requestId => 'q'}),
         ->content_like(qr{/component/unavailable/my-component\.js});
 }
 
+# a script without the `let tmpl;` marker gets the template just before its appendChild line
+$t->get_ok('/component/x/append-box.js')->status_is(200)
+    ->content_like(qr{tmpl\.innerHTML = "<p>append template</p>\\n";\s+shadowRoot\.appendChild\(tmpl\.content});
+
+# the last of several template parameters wins
+$t->get_ok('/component/x/my-component.js?template=notes&template=footer')->status_is(200)
+    ->content_like(qr{<p>footer template</p>})->content_unlike(qr{notes template});
+
+# the helper takes the name with or without .js, and template => undef switches templating off
+{
+    my $c = $t->app->build_controller;
+    is "" . $c->component('my-component.js'), "" . $c->component('my-component'), 'the .js suffix is optional';
+    my $off = "" . $c->component('my-component', {template => undef});
+    like $off, qr{\?template=false'}, 'template => undef is carried as template=false';
+    my ($src) = $off =~ m{src='([^']+)'};
+    $t->get_ok($src)->status_is(200)->content_unlike(qr{tmpl\.innerHTML});
+}
+
 # values the helper writes into the tag cannot end the attribute or double a slash
 {
     my $tag = sub ($base, $opts = {}) {
