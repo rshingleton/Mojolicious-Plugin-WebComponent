@@ -1,4 +1,4 @@
-[![Actions Status](https://github.com/rshingleton/Mojolicious-Plugin-WebComponent/actions/workflows/test.yml/badge.svg)](https://github.com/rshingleton/Mojolicious-Plugin-WebComponent/actions)
+[![Actions Status](https://github.com/rshingleton/Mojolicious-Plugin-WebComponent/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/rshingleton/Mojolicious-Plugin-WebComponent/actions?workflow=test)
 # NAME
 
 Mojolicious::Plugin::WebComponent - An effort to make creating and using custom web components easier

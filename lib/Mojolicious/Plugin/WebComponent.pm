@@ -5,7 +5,7 @@ use Carp;
 use Mojo::JSON qw(to_json);
 use Mojo::Util qw(decode encode sha1_sum url_escape xml_escape);
 
-our $VERSION = "0.07";
+our $VERSION = "0.08";
 
 # a component script is a .js file name, optionally below subfolders; no segment starts with a dot
 my $SEGMENT = qr/[\w-][\w.-]*/;

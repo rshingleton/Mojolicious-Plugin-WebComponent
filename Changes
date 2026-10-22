@@ -1,6 +1,8 @@
 Revision history for Perl extension Mojolicious-Plugin-WebComponent
 
 {{$NEXT}}
+
+0.08 2026-10-22T18:20:45Z
     - BREAKING: the script url is now /component/:checksum/*component, where the checksum is the SHA-1 of the rendered script, replacing the per-request id; urls are stable until the script, template or parameters change
     - script responses carry Cache-Control: public, max-age=31536000, immutable when the checksum matches, and no-cache otherwise
     - the requestId helper option replaces the checksum and is served with no-cache; its value is percent-encoded in the url as UTF-8, and a value containing a slash now dies because the route could not match it
