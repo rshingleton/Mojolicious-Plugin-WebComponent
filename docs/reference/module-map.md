@@ -18,13 +18,13 @@
 | `route` | 15 | attribute (lazy) | `any([HEAD GET] => "<path>/:checksum/*component")`, named `webcomponent`, handled by `_serve`; `<path>` is `config->{path}` or `/component` |
 | `app`, `config` | 20-21 | attributes | Set in `register` |
 | `register` | 23 | method | Stores app and config; returns early if the helper is already registered; sets stash default `webcomponent.helper`; adds the helper (name `config->{helper}` or `component`); builds the route and moves it to the front of `routes->children` |
-| `_serve` | 44 | route callback | Validates the name, builds the content, compares `:checksum` with the content's checksum, sets `Cache-Control` and the content type, renders as text |
-| `_checksum` | 65 | method | `sha1_sum` of the UTF-8 encoded content |
-| `_content` | 70 | method | Reads the script, injects the template block; undef when the script is absent; dies on invalid UTF-8 |
-| `_templateExists` | 105 | method | Looks for an html template by file or `__DATA__` section across all registered handlers |
-| `_templateScript` | 115 | method | The `let tmpl` block, or undef when `template` is `false`, `f`, `no` or `0` |
-| `_component` | 150 | helper body | Validates the name, computes the checksum (or takes `requestId`), returns the script tag as `Mojo::ByteStream` |
-| `_getAllParams` | 188 | method | Request params plus `mojo.captures` without `cb`, `checksum`, `component`, sorted by name, as `Mojo::Parameters` |
+| `_serve` | 45 | route callback | Validates the name, builds the content, compares `:checksum` with the content's checksum, sets `Cache-Control` and the content type, renders as text |
+| `_checksum` | 66 | method | `sha1_sum` of the UTF-8 encoded content |
+| `_content` | 71 | method | Reads the script, injects the template block; undef when the script is absent; dies on invalid UTF-8 |
+| `_templateExists` | 106 | method | Looks for an html template by file or `__DATA__` section across all registered handlers |
+| `_templateScript` | 116 | method | The `let tmpl` block, or undef when `template` is `false`, `f`, `no` or `0` |
+| `_component` | 151 | helper body | Validates the name, escapes the base path, computes the checksum (or takes `requestId`), returns the script tag as `Mojo::ByteStream` |
+| `_getAllParams` | 194 | method | Request params plus `mojo.captures` without `cb`, `checksum`, `component`, sorted by name, as `Mojo::Parameters` |
 
 The `component` helper with no arguments returns the plugin object itself
-(`WebComponent.pm:35`); with arguments it calls `_component`.
+(`WebComponent.pm:36`); with arguments it calls `_component`.

@@ -249,6 +249,78 @@ is $alt->app->component('alt-box', {requestId => 'q'}),
         ->content_like(qr{/component/unavailable/my-component\.js});
 }
 
+# values the helper writes into the tag cannot end the attribute or double a slash
+{
+    my $tag = sub ($base, $opts = {}) {
+        my $app = Mojolicious->new(mode => 'test');
+        $app->static->paths([$files]);
+        $app->renderer->paths([$templates]);
+        $app->plugin('WebComponent');
+        my $c = $app->build_controller;
+        $c->req->url->base->path->parse($base);
+        return "" . $c->component('my-component', $opts);
+    };
+    my $sum = qr{[0-9a-f]{40}};
+    like $tag->(q{/x'onload='y}), qr{\A<script src='/x&#39;onload=&#39;y/component/$sum/my-component\.js'></script>\z},
+        'a quote in the base path is escaped';
+    like $tag->('/prefix'), qr{\A<script src='/prefix/component/$sum/}, 'plain base path unchanged';
+    like $tag->('/prefix/'), qr{\A<script src='/prefix/component/$sum/}, 'trailing slash of the base path is dropped';
+    like $tag->('', {requestId => q{a'b c}}), qr{\A<script src='/component/a%27b%20c/my-component\.js'></script>\z},
+        'requestId is percent-encoded';
+    like $tag->('', {requestId => "\x{4e2d}"}), qr{/component/%E4%B8%AD/}, 'requestId is encoded as UTF-8';
+    like $tag->('', {requestId => '0'}), qr{/component/0/}, 'a requestId of 0 is used';
+    eval { $tag->('', {requestId => 'a/b'}) };
+    like $@, qr{invalid requestId}, 'a requestId with a slash cannot be served and is refused';
+    like $tag->('', {requestId => 'v2-test.1'}), qr{/component/v2-test\.1/}, 'a plain requestId is unchanged';
+
+    # an encoded requestId is a url the route matches
+    my $t = tester();
+    $t->get_ok('/component/a%27b%20c/my-component.js')->status_is(200)->header_is('Cache-Control' => 'no-cache');
+    $t->get_ok('/component/%E4%B8%AD/my-component.js')->status_is(200);
+}
+
+# registering twice with a custom helper name keeps one helper and one route
+{
+    my $app = Mojolicious->new(mode => 'test');
+    my @log;
+    $app->log->level('debug')->on(message => sub ($log, $level, @lines) { push @log, "$level: @lines" });
+    $app->plugin(WebComponent => {helper => 'wc'});
+    my $count = sub { scalar grep { ($_->name // '') eq 'webcomponent' } @{$app->routes->children} };
+    is $count->(), 1, 'one route after the first registration';
+    $app->plugin(WebComponent => {helper => 'wc'});
+    is $count->(), 1, 'still one route after the second';
+    ok scalar(grep { /Helper wc\(\) is already registered/ } @log), 'the second registration is logged';
+}
+
+# the helper name must be a plain word
+for my $bad (q{a b}, q{x/y}, q{}, q{a-b}) {
+    my $app = Mojolicious->new(mode => 'test');
+    eval { $app->plugin(WebComponent => {helper => $bad}) };
+    like $@, qr{invalid helper name}, "helper '$bad' is refused";
+}
+
+# a script that is not valid UTF-8 is a server error, and a missing one is logged
+{
+    require File::Temp;
+    my $dir = File::Temp->newdir;
+    my $dest = Mojo::File->new($dir, qw(assets js components))->make_path;
+    open my $fh, '>:raw', $dest->child('bad-box.js') or die $!;
+    print $fh "// \xff\xfe not utf-8\nlet tmpl;\n";
+    close $fh;
+    my $app = Mojolicious->new(mode => 'test');
+    my @log;
+    $app->log->level('debug')->on(message => sub ($log, $level, @lines) { push @log, "$level: @lines" });
+    $app->static->paths(["$dir"]);
+    $app->renderer->paths([$templates]);
+    $app->plugin('WebComponent');
+    my $t = Test::Mojo->new($app);
+    $t->get_ok('/component/x/bad-box.js')->status_is(500);
+    my $c = $app->build_controller;
+    @log = ();
+    $c->component('no-such-box');
+    ok scalar(grep { /no-such-box\.js/ && /not found/ } @log), 'a missing script is logged';
+}
+
 done_testing;
 
 __DATA__

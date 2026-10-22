@@ -297,7 +297,7 @@ plugin to skip any template processing and assume that the html content is embed
 #### requestId
 
 Replaces the checksum in the url with the value given, for example a release number. The script is then served with
-`Cache-Control: no-cache`, because the url no longer proves what it contains.
+`Cache-Control: no-cache`, because the url no longer proves what it contains. The value is percent-encoded in the url (as UTF-8), and it cannot contain a slash, because the route could not match it; the helper dies if it does.
 
     %= component 'my-web-component', { requestId => 'v2' }
 
@@ -318,6 +318,13 @@ When the checksum in the url matches the script being served, the response carri
 `Cache-Control: public, max-age=31536000, immutable`. Any other checksum, for example from a page that was cached
 before the script changed, is still answered with the current script, but with `Cache-Control: no-cache`.
 
+A template that prints data of the current user (the session, for example) matches its own checksum, so its script is
+sent as `public` like any other. A shared cache in front of the application could then store it. Keep such data out of
+component templates, or have the shared cache bypass `/component/`.
+
+Behind a reverse proxy the path the application was told about (the base path of the request URL) is put in front of
+the route, without a trailing slash and escaped for use inside the tag.
+
 # METHODS
 
 ## register
@@ -328,7 +335,8 @@ Used to register the plugin in the application. `%config` can contain:
 
 - helper
 
-    Name of the helper to add to the application. Default is "component".
+    Name of the helper to add to the application. Default is "component". It must be a plain word (letters, digits and
+    underscore); any other name dies.
 
 # SOURCE
 

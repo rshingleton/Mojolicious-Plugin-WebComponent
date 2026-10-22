@@ -3,7 +3,7 @@ use v5.20;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Mojo::JSON qw(to_json);
-use Mojo::Util qw(decode encode sha1_sum xml_escape);
+use Mojo::Util qw(decode encode sha1_sum url_escape xml_escape);
 
 our $VERSION = "0.07";
 
@@ -25,6 +25,7 @@ sub register($self, $app, $config) {
     $self->app($app);
 
     my $helper = $config->{helper} // 'component';
+    croak "WebComponent: invalid helper name '$helper'" unless $helper =~ /\A\w+\z/a;
 
     if ($app->renderer->helpers->{$helper}) {
         return $app->log->debug("WebComponent: Helper $helper() is already registered.");
@@ -155,7 +156,9 @@ sub _component {
     my $route = $self->route;
 
     my $base = $c->req->url->base->path->{path};
-    my $path = $base ? $base . $route->pattern->unparsed
+    # the base path may come from a proxy header: no trailing slash, and safe inside the quoted attribute
+    $base =~ s{/+\z}{} if defined $base;
+    my $path = $base ? xml_escape($base) . $route->pattern->unparsed
         : $route->pattern->unparsed;
 
     $name .= ".js" if $name !~ m/\.js$/;
@@ -170,9 +173,12 @@ sub _component {
 
     # the checksum is that of the script the url will serve; a script or template that
     # cannot be built here must not break the page, the url then reports it when fetched
-    my $checksum = $opts->{requestId} || do {
+    my $requestId = $opts->{requestId};
+    croak "WebComponent: invalid requestId '$requestId', it cannot contain a slash" if defined($requestId) && $requestId =~ m{/};
+    my $checksum = length($requestId // '') ? url_escape(encode('UTF-8', $requestId)) : do {
         my $content = eval { $self->_content($c, $name, $params) };
         $self->app->log->warn("WebComponent: cannot fingerprint $name: $@") if $@;
+        $self->app->log->debug("WebComponent: script $name not found") if !$@ && !defined $content;
         defined $content ? $self->_checksum($content) : 'unavailable';
     };
 
@@ -503,7 +509,7 @@ plugin to skip any template processing and assume that the html content is embed
 =head4 requestId
 
 Replaces the checksum in the url with the value given, for example a release number. The script is then served with
-C<Cache-Control: no-cache>, because the url no longer proves what it contains.
+C<Cache-Control: no-cache>, because the url no longer proves what it contains. The value is percent-encoded in the url (as UTF-8), and it cannot contain a slash, because the route could not match it; the helper dies if it does.
 
     %= component 'my-web-component', { requestId => 'v2' }
 
@@ -529,6 +535,13 @@ When the checksum in the url matches the script being served, the response carri
 C<Cache-Control: public, max-age=31536000, immutable>. Any other checksum, for example from a page that was cached
 before the script changed, is still answered with the current script, but with C<Cache-Control: no-cache>.
 
+A template that prints data of the current user (the session, for example) matches its own checksum, so its script is
+sent as C<public> like any other. A shared cache in front of the application could then store it. Keep such data out of
+component templates, or have the shared cache bypass C</component/>.
+
+Behind a reverse proxy the path the application was told about (the base path of the request URL) is put in front of
+the route, without a trailing slash and escaped for use inside the tag.
+
 =head1 METHODS
 
 =head2 register
@@ -541,7 +554,8 @@ Used to register the plugin in the application. C<%config> can contain:
 
 =item * helper
 
-Name of the helper to add to the application. Default is "component".
+Name of the helper to add to the application. Default is "component". It must be a plain word (letters, digits and
+underscore); any other name dies.
 
 =back
 

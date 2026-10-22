@@ -43,4 +43,4 @@ The distribution is one Perl module. Its documentation is the POD after
 A library installed from CPAN (`requires 'Mojolicious', '9.27'` and
 `requires 'perl', '5.020'` in `cpanfile`). It has no service of its own.
 Reverse-proxy installs are supported by prefixing the generated script path
-with the request's base path (`WebComponent.pm:157-158`, Changes 0.07).
+with the request's base path (`WebComponent.pm:158-162`, Changes 0.07).

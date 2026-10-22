@@ -21,3 +21,6 @@ bounds what is served.
 - The helper renders with the page's controller and the route with the script request's, so a template that reads the
   session or the current route can render differently in each. The checksum then never matches and the script is
   served `no-cache`: correct, but uncached.
+- A template that prints the current user's data matches its own checksum and is sent `public`, so a shared cache in
+  front of the app could store it. The route cannot tell such a template from a shared one; the POD tells authors to
+  keep user data out of component templates.
