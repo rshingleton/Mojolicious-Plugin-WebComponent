@@ -12,7 +12,6 @@ sub tester(%config) {
     $app->static->paths([$files]);
     $app->renderer->paths([$templates]);
     $app->plugin(WebComponent => \%config);
-    $app->renderer->warmup;
     $app->routes->get('/helper' => sub ($c) {
         $c->render(text => join "\n",
             $c->component('my-component', {requestId => 'r'}),
@@ -38,7 +37,6 @@ $t->get_ok('/component/x/my-component.js')->status_is(200)
     $app->renderer->paths([$templates]);
     $app->routes->any('/*any' => sub ($c) { $c->render(text => 'catchall') });
     $app->plugin('WebComponent');
-    $app->renderer->warmup;
     Test::Mojo->new($app)->get_ok('/component/x/my-component.js')->status_is(200)
         ->content_like(qr{custom web component});
 }
@@ -134,4 +132,41 @@ $alt->get_ok('/component/x/alt-box.js')->status_is(404);
 is $alt->app->component('alt-box', {requestId => 'q'}),
     "<script src='/wc/q/alt-box.js'></script>", 'helper uses the configured path';
 
+# the helper name is configurable
+{
+    my $app = Mojolicious->new(mode => q{test});
+    $app->static->paths([$files]);
+    $app->renderer->paths([$templates]);
+    $app->plugin(WebComponent => {helper => q{wc}});
+    is $app->wc(q{my-component}, {requestId => q{q}}),
+        "<script src='/component/q/my-component.js'></script>", q{helper name from config};
+    ok !$app->renderer->helpers->{component}, q{default helper name is not registered};
+    Test::Mojo->new($app)->get_ok(q{/component/x/my-component.js})->status_is(200)
+        ->content_like(qr{custom web component});
+}
+
+# template lookup finds DATA templates and templates of any registered handler, without a warmup
+{
+    my $app = Mojolicious->new(mode => q{test});
+    $app->static->paths([$files]);
+    $app->renderer->paths([$templates]);
+    $app->renderer->classes([q{main}]);
+    $app->renderer->add_handler(up => sub ($r, $c, $output, $options) {
+        $$output = Mojo::File->new($r->template_path($options))->slurp;
+    });
+    $app->plugin(q{WebComponent});
+    my $t = Test::Mojo->new($app);
+    $t->get_ok(q{/component/x/my-component.js?template=data-box})->status_is(200)
+        ->content_like(qr{<p>from data section});
+    $t->get_ok(q{/component/x/my-component.js?template=custom})->status_is(200)
+        ->content_like(qr{<p>handled by up});
+    $t->get_ok(q{/component/x/my-component.js?template=missing})->status_is(200)
+        ->content_like(qr{missing template not found});
+}
+
 done_testing;
+
+__DATA__
+
+@@ components/data-box.html.ep
+<p>from data section</p>

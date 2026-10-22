@@ -2,7 +2,6 @@ package Mojolicious::Plugin::WebComponent;
 use v5.20;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
-use Data::Dumper;
 use Mojo::JSON qw(to_json);
 use Mojo::Util qw(decode xml_escape);
 
@@ -25,7 +24,7 @@ sub register($self, $app, $config) {
     $self->config($config);
     $self->app($app);
 
-    my $helper = 'component';
+    my $helper = $config->{helper} // 'component';
 
     if ($app->renderer->helpers->{$helper}) {
         return $app->log->debug("WebComponent: Helper $helper() is already registered.");
@@ -54,7 +53,6 @@ sub _serve {
     my $assetDir = $app->static->asset_dir;
     my $javascriptPath = $self->config->{javascript_path} ? $self->config->{javascript_path} : "components";
 
-    # my $publicPath = $app->static->{paths}->[0];
     my $js = "/$assetDir/js/$javascriptPath/$component";
     my $asset = $app->static->file($js);
     return $c->reply->not_found unless $asset;
@@ -86,6 +84,16 @@ sub _serve {
     $c->render(text => $content);
 }
 
+# Is there an html template of this name, as a file or in a DATA section, for any registered handler?
+sub _templateExists($self, $template) {
+    my $renderer = $self->app->renderer;
+    for my $handler (keys %{$renderer->handlers}) {
+        my $options = {template => $template, format => 'html', handler => $handler};
+        return 1 if defined($renderer->template_path($options)) || defined($renderer->get_data_template($options));
+    }
+    return 0;
+}
+
 # The script that defines `tmpl` for the component, or undef when templating is switched off.
 sub _templateScript($self, $c, $component) {
     my $params = $self->_getAllParams($c)->to_hash;
@@ -107,7 +115,7 @@ sub _templateScript($self, $c, $component) {
     if ($templateFile =~ $TEMPLATE_NAME) {
         my $template = "$templatePath/$templateFile";
         $label = xml_escape($template) . ' ';
-        if ($self->app->renderer->{templates}->{"$template.html"}) {
+        if ($self->_templateExists($template)) {
             $tmplHtml = $c->render_to_string($template, params => $params);
         }
     }
@@ -236,7 +244,7 @@ The base application is taking advantage of L<Mojolicious::Plugin::WebComponent>
 
         $self->plugin(AssetPack => { pipes => [ qw(Sass Css JavaScript Combine Fetch) ] });
         $self->asset->store->paths($self->static->paths);
-        $self->plugin(WebCojsDeferredmponent => { path => "$path/component" });
+        $self->plugin(WebComponent => { path => "$path/component" });
 
         my @css =(
             "https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css",
@@ -374,8 +382,8 @@ this example, the <%= $params->{system} %> will print out the system name param 
     <div x-data>
         <div :loading="$store.hosts.data.length===0">
             Loading Host Data...
-        </ldiv>
-        <div x-show="$store.systems.data.length>0">
+        </div>
+        <div x-show="$store.hosts.data.length>0">
         <%= $params->{system} %> HOSTS: <span x-text="$store.hosts.data.length"></span>
             <table class="table table-borderless table-sm m-2">
                 <tbody>

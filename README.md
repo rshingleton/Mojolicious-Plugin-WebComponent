@@ -67,7 +67,7 @@ The base application is taking advantage of [Mojolicious::Plugin::WebComponent](
 
         $self->plugin(AssetPack => { pipes => [ qw(Sass Css JavaScript Combine Fetch) ] });
         $self->asset->store->paths($self->static->paths);
-        $self->plugin(WebCojsDeferredmponent => { path => "$path/component" });
+        $self->plugin(WebComponent => { path => "$path/component" });
 
         my @css =(
             "https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css",
@@ -204,8 +204,8 @@ this example, the <%= $params->{system} %> will print out the system name param 
     <div x-data>
         <div :loading="$store.hosts.data.length===0">
             Loading Host Data...
-        </ldiv>
-        <div x-show="$store.systems.data.length>0">
+        </div>
+        <div x-show="$store.hosts.data.length>0">
         <%= $params->{system} %> HOSTS: <span x-text="$store.hosts.data.length"></span>
             <table class="table table-borderless table-sm m-2">
                 <tbody>
