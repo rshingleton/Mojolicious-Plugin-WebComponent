@@ -49,6 +49,29 @@ async function open(path) {
     await page.evaluate(() => document.querySelector('inline-box')?.shadowRoot?.querySelector('#in')?.textContent) === 'inline ok');
   await page.close();
 }
+// the checksum url is the same on every page view (and from every worker), so the browser caches the script
+{
+  // one context, so both page views share an HTTP cache
+  const context = await browser.newContext();
+  const src = async () => {
+    const page = await context.newPage();
+    await page.goto(base + '/page?q=cache');
+    await page.waitForTimeout(300);
+    const out = await page.evaluate(() => ({
+      src: document.querySelector('script[src*="my-component.js"]').getAttribute('src'),
+      transfer: performance.getEntriesByType('resource').filter(e => e.name.includes('my-component.js')).map(e => e.transferSize),
+    }));
+    await page.close();
+    return out;
+  };
+  const first = await src(), second = await src();
+  check('script url is stable across page views', first.src === second.src, `${first.src} | ${second.src}`);
+  check('second page view takes the script from the browser cache', second.transfer.length === 1 && second.transfer[0] === 0, second.transfer.join(','));
+  const res = await fetch(base + first.src);
+  check('script is served immutable for its own checksum', res.headers.get('cache-control') === 'public, max-age=31536000, immutable', res.headers.get('cache-control'));
+  const stale = await fetch(base + first.src.replace(/\/[0-9a-f]{40}\//, '/' + '0'.repeat(40) + '/'));
+  check('a stale checksum is served no-cache', stale.status === 200 && stale.headers.get('cache-control') === 'no-cache', stale.headers.get('cache-control'));
+}
 for (const [label, qs] of [['${} in a param echoed by a template', 'q=' + encodeURIComponent('${window.__pwned=1}')],
                            ['backtick in the template param (404 message)', 'template=' + encodeURIComponent('`;window.__pwned=1;`')]]) {
   const { page } = await open('/page?' + qs);

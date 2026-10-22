@@ -164,6 +164,91 @@ is $alt->app->component('alt-box', {requestId => 'q'}),
         ->content_like(qr{missing template not found});
 }
 
+# the url carries a checksum of the served content: stable across requests and apps,
+# new when the script, the template or a parameter changes
+{
+    my $url = sub ($app, $name, $opts = {}, $query = '') {
+        my $c = $app->build_controller;
+        $c->req->url->parse($query) if length $query;
+        my $tag = $c->component($name, $opts);
+        $tag =~ m{src='(/component/([0-9a-f]{40})/[^']+)'} or return;
+        return wantarray ? ($1, $2) : $1;
+    };
+    my $app1 = tester()->app;
+    my $app2 = tester()->app;
+    my ($first, $sum) = $url->($app1, 'my-component');
+    ok $sum, 'url has a 40 character checksum';
+    is scalar $url->($app1, 'my-component'), $first, 'same url on the next request';
+    is scalar $url->($app2, 'my-component'), $first, 'same url from another app instance';
+    my (undef, $other) = $url->($app1, 'my-component', {template => 'notes'});
+    isnt $other, $sum, 'other template, other checksum';
+    # echo-box prints its q parameter, so q changes what is served
+    my (undef, $q1) = $url->($app1, 'echo-box', {}, '/?q=one');
+    (undef, $other) = $url->($app1, 'echo-box', {}, '/?q=two');
+    isnt $other, $q1, 'a parameter the template uses, other checksum';
+    (undef, $other) = $url->($app1, 'my-component', {}, '/?who=you');
+    is $other, $sum, 'a parameter nothing uses, same checksum';
+    (undef, $other) = $url->($app1, 'utf-box');
+    isnt $other, $sum, 'other component, other checksum';
+
+    # the query string is in a fixed order, or its url would differ from one process to the next
+    like scalar $url->($app1, 'my-component', {}, '/?d=4&b=2&e=5&a=1&c=3'), qr{\?a=1&b=2&c=3&d=4&e=5\z},
+        'parameters are sorted';
+
+    # an edit of the script or of the template changes the checksum
+    require File::Temp;
+    my $dir = File::Temp->newdir;
+    my $public = Mojo::File->new($dir, 'public');
+    my $tpl = Mojo::File->new($dir, 'templates');
+    # Mojo::File spew is not in the oldest supported Mojolicious
+    my $write = sub ($file, $text) { open my $fh, '>', $file or die "$file: $!"; print $fh $text; close $fh };
+    $public->child(qw(assets js components))->make_path;
+    $tpl->child('components')->make_path;
+    $write->($public->child(qw(assets js components edit-box.js)), "// v1\nlet tmpl;\n");
+    $write->($tpl->child(qw(components edit-box.html.ep)), "<p>one</p>\n");
+    my $app = Mojolicious->new(mode => 'test');
+    $app->static->paths([$public->to_string]);
+    $app->renderer->paths([$tpl->to_string]);
+    $app->renderer->cache->max_keys(0);
+    $app->plugin('WebComponent');
+    my $v1 = $url->($app, 'edit-box');
+    $write->($tpl->child(qw(components edit-box.html.ep)), "<p>two</p>\n");
+    my $v2 = $url->($app, 'edit-box');
+    isnt $v2, $v1, 'edited template, new url';
+    $write->($public->child(qw(assets js components edit-box.js)), "// v2\nlet tmpl;\n");
+    isnt scalar $url->($app, 'edit-box'), $v2, 'edited script, new url';
+}
+
+# cache headers: immutable for a matching checksum, no-cache otherwise
+{
+    my $t = tester();
+    my $url = $t->app->build_controller->component('my-component') =~ m{src='([^']+)'} && $1;
+    $t->get_ok($url)->status_is(200)
+        ->header_is('Cache-Control' => 'public, max-age=31536000, immutable');
+    $t->head_ok($url)->status_is(200)
+        ->header_is('Cache-Control' => 'public, max-age=31536000, immutable');
+    $t->get_ok('/component/' . ('0' x 40) . '/my-component.js')->status_is(200)
+        ->header_is('Cache-Control' => 'no-cache')->content_like(qr{custom web component});
+    my $pinned = $t->app->build_controller->component('my-component', {requestId => 'v1'}) =~ m{src='([^']+)'} && $1;
+    is $pinned, '/component/v1/my-component.js', 'requestId overrides the checksum';
+    $t->get_ok($pinned)->status_is(200)->header_is('Cache-Control' => 'no-cache');
+    $t->get_ok('/component/x/nope.js')->status_is(404)
+        ->header_isnt('Cache-Control' => 'public, max-age=31536000, immutable');
+}
+
+# a template that cannot render does not break the page that holds the helper
+{
+    my $app = Mojolicious->new(mode => 'test');
+    $app->static->paths([$files]);
+    $app->renderer->paths([$templates]);
+    $app->plugin('WebComponent');
+    $app->routes->get('/page' => sub ($c) {
+        $c->render(text => $c->component('my-component', {template => 'broken'}));
+    });
+    Test::Mojo->new($app)->get_ok('/page')->status_is(200)
+        ->content_like(qr{/component/unavailable/my-component\.js});
+}
+
 done_testing;
 
 __DATA__

@@ -3,7 +3,7 @@ use v5.20;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Mojo::JSON qw(to_json);
-use Mojo::Util qw(decode xml_escape);
+use Mojo::Util qw(decode encode sha1_sum xml_escape);
 
 our $VERSION = "0.07";
 
@@ -15,7 +15,7 @@ my $TEMPLATE_NAME = qr{\A(?:$SEGMENT/)*$SEGMENT\z};
 has route => sub {
     my $self = shift;
     my $root = $self->config->{path} ? $self->config->{path} : '/component';
-    $self->app->routes->any([ qw(HEAD GET) ] => "$root/:req/*component")->name('webcomponent')->to(cb => \&_serve);
+    $self->app->routes->any([ qw(HEAD GET) ] => "$root/:checksum/*component")->name('webcomponent')->to(cb => \&_serve);
 };
 has 'app';
 has 'config';
@@ -45,23 +45,42 @@ sub _serve {
     my $c = shift;
     my $helper = $c->stash('webcomponent.helper');
     my $self = $c->$helper;
-    my $app = $self->app;
 
     my $component = $c->param('component');
     return $c->reply->not_found unless defined($component) && $component =~ $COMPONENT_NAME;
 
+    my $content = $self->_content($c, $component, $self->_getAllParams($c));
+    return $c->reply->not_found unless defined $content;
+
+    # the url names its content: only a url that still matches may be cached for good,
+    # so a page that links an older version never pins it in a cache
+    my $current = ($c->param('checksum') // '') eq $self->_checksum($content);
+    $c->res->headers->cache_control($current ? 'public, max-age=31536000, immutable' : 'no-cache');
+
+    # an explicit charset: a script tag otherwise decodes with the page's encoding
+    $c->res->headers->content_type('application/javascript; charset=UTF-8');
+    $c->render(text => $content);
+}
+
+sub _checksum($self, $content) {
+    return sha1_sum(encode('UTF-8', $content));
+}
+
+# The script served for $component with its template injected, or undef when there is no such script.
+sub _content($self, $c, $component, $params) {
+    my $app = $self->app;
     my $assetDir = $app->static->asset_dir;
     my $javascriptPath = $self->config->{javascript_path} ? $self->config->{javascript_path} : "components";
 
     my $js = "/$assetDir/js/$javascriptPath/$component";
     my $asset = $app->static->file($js);
-    return $c->reply->not_found unless $asset;
+    return undef unless $asset;
 
     my $source = decode('UTF-8', $asset->slurp);
-    return $c->reply->exception("WebComponent: $component is not valid UTF-8") unless defined $source;
+    die "WebComponent: $component is not valid UTF-8\n" unless defined $source;
 
-    my $tmpl = $self->_templateScript($c, $component);
-    my $content;
+    my $tmpl = $self->_templateScript($c, $component, $params);
+    my $content = '';
     my $tmplInit = 0;
     for (split /(?<=\n)/, $source) {
         if ($tmpl && !$tmplInit) {
@@ -79,9 +98,7 @@ sub _serve {
         $content .= $_;
     }
 
-    # an explicit charset: a script tag otherwise decodes with the page's encoding
-    $c->res->headers->content_type('application/javascript; charset=UTF-8');
-    $c->render(text => $content);
+    return $content;
 }
 
 # Is there an html template of this name, as a file or in a DATA section, for any registered handler?
@@ -95,8 +112,8 @@ sub _templateExists($self, $template) {
 }
 
 # The script that defines `tmpl` for the component, or undef when templating is switched off.
-sub _templateScript($self, $c, $component) {
-    my $params = $self->_getAllParams($c)->to_hash;
+sub _templateScript($self, $c, $component, $params) {
+    $params = $params->to_hash;
     my $templatePath = $self->config->{template_path} ? $self->config->{template_path} : "components";
 
     my $templateFile;
@@ -141,19 +158,26 @@ sub _component {
     my $path = $base ? $base . $route->pattern->unparsed
         : $route->pattern->unparsed;
 
+    $name .= ".js" if $name !~ m/\.js$/;
+    croak "WebComponent: invalid component name '$name'" unless $name =~ $COMPONENT_NAME;
+
     my $params = $self->_getAllParams($c);
     if (exists($opts->{template})) {
         $params->param(template => defined($opts->{template}) ? $opts->{template} : 'false');
     }
 
     my $paramString = $params->to_string;
-    my $reqId = $opts->{requestId} || $c->req->request_id;
 
-    $name .= ".js" if $name !~ m/\.js$/;
-    croak "WebComponent: invalid component name '$name'" unless $name =~ $COMPONENT_NAME;
+    # the checksum is that of the script the url will serve; a script or template that
+    # cannot be built here must not break the page, the url then reports it when fetched
+    my $checksum = $opts->{requestId} || do {
+        my $content = eval { $self->_content($c, $name, $params) };
+        $self->app->log->warn("WebComponent: cannot fingerprint $name: $@") if $@;
+        defined $content ? $self->_checksum($content) : 'unavailable';
+    };
 
-    # :req/:component
-    $path =~ s/:req/$reqId/;
+    # :checksum/:component
+    $path =~ s/:checksum/$checksum/;
     $path =~ s/\*component/$name/;
     $path .= "?$paramString" if length($paramString);
     my $ref = "<script src='$path'></script>";
@@ -165,8 +189,10 @@ sub _getAllParams($self, $c) {
     my $rp = $c->req->params->to_hash;
     # route-internal captures are not parameters of the component
     my %captures = %{$c->stash->{'mojo.captures'} // {}};
-    delete @captures{qw(cb req component)};
-    return Mojo::Parameters->new(%{$rp}, %captures);
+    delete @captures{qw(cb checksum component)};
+    # sorted, so the same inputs give the same url in every process
+    my %all = (%{$rp}, %captures);
+    return Mojo::Parameters->new(map { $_ => $all{$_} } sort keys %all);
 }
 
 1;
@@ -414,7 +440,7 @@ default: /component
 The path setting can be used to set the base url for the controller. This is useful for reverse proxy settings or if you
 want to modify the controller path. The controller pattern is:
 
-    $path/:req/*component
+    $path/:checksum/*component
 
 =head2 javascript_path
 
@@ -448,12 +474,16 @@ a matching JavaScript file, by default found in public/assets/js/components
 
     %= component 'my-web-component'
 
-The generated script tag will include a reference to the original request ID, the provided component script name, and
-parameters from the original request.
+The generated script tag will include a checksum of the script the url serves, the provided component script name, and
+parameters from the original request. The checksum is the SHA-1 of the script after its template has been rendered, so
+the url stays the same until the script, its template or a parameter changes, and the browser can cache the script. To
+compute it the helper renders the template, so each page view renders every component twice. A template whose output
+depends on more than the request parameters (the session, the current route) can render differently for the page than
+for the script request; its checksum then never matches and the script is served with C<Cache-Control: no-cache>.
 
 
     # example tag generation
-    <script src='/component/a8YekaIml2CJ/my-web-component.js?controller=default&action=index&pathParam1=testPathParam1&queryParam1=testQueryParam'></script>
+    <script src='/component/3f786850e387550fdab836ed7e6dc881de23001b/my-web-component.js?controller=default&action=index&pathParam1=testPathParam1&queryParam1=testQueryParam'></script>
 
 =head3 Helper Options
 
@@ -470,10 +500,17 @@ it as a hash entry to the component helper
 This would map my-web-component.js to my-special-template.html.ep. Passing a undef to the template key will cause the
 plugin to skip any template processing and assume that the html content is embedded in the JavaScript file already.
 
+=head4 requestId
+
+Replaces the checksum in the url with the value given, for example a release number. The script is then served with
+C<Cache-Control: no-cache>, because the url no longer proves what it contains.
+
+    %= component 'my-web-component', { requestId => 'v2' }
+
 =head1 ROUTES
 
 This plugin creates a route to return the WebComponent script to the application. The default route is
-/component/:reqId/*component. The path configuration setting can be passed during initialization to modify the base
+/component/:checksum/*component. The path configuration setting can be passed during initialization to modify the base
 path of the controller.
 
 The route is created when the plugin is registered and is moved ahead of the routes the application has already
@@ -481,11 +518,16 @@ declared, so a catch-all route cannot hide it. For the same reason, a route of y
 reached. Component names are file names ending in .js, optionally below sub folders (sub/my-component.js); a segment
 may not start with a dot. Any other name gets a 404, and the component helper dies when given one.
 
-=head2 /component/:reqId/*component
+=head2 /component/:checksum/*component
 
 This is generated by the component helper and is a script tag associated with the
-custom component url. For example, the helper generates <script src='/component/kbB7s76PmaY9/my-component.js'></script>.
-Navigating to the url, /component/kbB7s76PmaY9/my-component.js, will return the templated JavaScript component file.
+custom component url. For example, the helper generates <script src='/component/3f786850e387550fdab836ed7e6dc881de23001b/my-component.js'></script>.
+Navigating to the url, /component/3f786850e387550fdab836ed7e6dc881de23001b/my-component.js, will return the templated
+JavaScript component file.
+
+When the checksum in the url matches the script being served, the response carries
+C<Cache-Control: public, max-age=31536000, immutable>. Any other checksum, for example from a page that was cached
+before the script changed, is still answered with the current script, but with C<Cache-Control: no-cache>.
 
 =head1 METHODS
 
