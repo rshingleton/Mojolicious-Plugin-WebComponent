@@ -3,8 +3,15 @@ use v5.20;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 use Carp;
 use Data::Dumper;
+use Mojo::JSON qw(to_json);
+use Mojo::Util qw(decode xml_escape);
 
 our $VERSION = "0.07";
+
+# a component script is a .js file name, optionally below subfolders; no segment starts with a dot
+my $SEGMENT = qr/[\w-][\w.-]*/;
+my $COMPONENT_NAME = qr{\A(?:$SEGMENT/)*$SEGMENT\.js\z}a;
+my $TEMPLATE_NAME = qr{\A(?:$SEGMENT/)*$SEGMENT\z};
 
 has route => sub {
     my $self = shift;
@@ -27,6 +34,12 @@ sub register($self, $app, $config) {
     $app->defaults('webcomponent.helper' => $helper);
 
     $app->helper($helper => sub {@_ == 1 ? $self : $self->_component(@_)});
+
+    # create the route now so every worker serves it from the first request, and put it
+    # first so a catch-all route the app declared earlier cannot shadow it
+    my $route = $self->route;
+    my $children = $app->routes->children;
+    @$children = ($route, grep { $_ != $route } @$children);
 }
 
 sub _serve {
@@ -36,51 +49,23 @@ sub _serve {
     my $app = $self->app;
 
     my $component = $c->param('component');
-    my $params = $self->_getAllParams($c)->to_hash;
+    return $c->reply->not_found unless defined($component) && $component =~ $COMPONENT_NAME;
 
     my $assetDir = $app->static->asset_dir;
     my $javascriptPath = $self->config->{javascript_path} ? $self->config->{javascript_path} : "components";
-    my $templatePath = $self->config->{template_path} ? $self->config->{template_path} : "components";
-
-    my $templateFile;
-    my $skipTemplate;
-    if (exists($params->{template})) {
-        my $template = $params->{template};
-        if ($template =~ m/(false|f|no|0)/i || !defined($template)) {
-            $skipTemplate = 1;
-        }
-        else {
-            $templateFile = $template;
-        }
-    }
-
-    my $tmpl;
-    if (!defined($skipTemplate)) {
-        my $tmplHtml;
-        # if the template file is not set,
-        $templateFile //= $component =~ s/\.js//gr;
-        my $template = "$templatePath/$templateFile";
-        if ($app->renderer->{templates}->{"$template.html"}) {
-            $tmplHtml = $c->render_to_string($template, params => $params);
-        }
-
-        # If the template file was not found, show it
-        $tmplHtml //= "<div>404 -  $template template not found</div>";
-
-        $tmpl = qq{
-                    let tmpl = document.createElement('template');
-                    tmpl.innerHTML = `$tmplHtml`
-            };
-    }
 
     # my $publicPath = $app->static->{paths}->[0];
     my $js = "/$assetDir/js/$javascriptPath/$component";
     my $asset = $app->static->file($js);
+    return $c->reply->not_found unless $asset;
 
+    my $source = decode('UTF-8', $asset->slurp);
+    return $c->reply->exception("WebComponent: $component is not valid UTF-8") unless defined $source;
+
+    my $tmpl = $self->_templateScript($c, $component);
     my $content;
-    my $fh = $asset->handle;
     my $tmplInit = 0;
-    while (<$fh>) {
+    for (split /(?<=\n)/, $source) {
         if ($tmpl && !$tmplInit) {
             if ($_ =~ m/let tmpl;/) {
                 $content .= $tmpl;
@@ -96,7 +81,45 @@ sub _serve {
         $content .= $_;
     }
 
+    # an explicit charset: a script tag otherwise decodes with the page's encoding
+    $c->res->headers->content_type('application/javascript; charset=UTF-8');
     $c->render(text => $content);
+}
+
+# The script that defines `tmpl` for the component, or undef when templating is switched off.
+sub _templateScript($self, $c, $component) {
+    my $params = $self->_getAllParams($c)->to_hash;
+    my $templatePath = $self->config->{template_path} ? $self->config->{template_path} : "components";
+
+    my $templateFile;
+    if (exists($params->{template})) {
+        my $template = $params->{template};
+        $template = $template->[-1] if ref($template) eq 'ARRAY';
+        return undef if !defined($template) || $template =~ m/\A(?:false|f|no|0)\z/i;
+        $templateFile = $template;
+    }
+
+    # if the template file is not set,
+    $templateFile //= $component =~ s/\.js\z//r;
+
+    my $tmplHtml;
+    my $label = '';
+    if ($templateFile =~ $TEMPLATE_NAME) {
+        my $template = "$templatePath/$templateFile";
+        $label = xml_escape($template) . ' ';
+        if ($self->app->renderer->{templates}->{"$template.html"}) {
+            $tmplHtml = $c->render_to_string($template, params => $params);
+        }
+    }
+
+    # If the template file was not found, show it
+    $tmplHtml //= "<div>404 - ${label}template not found</div>";
+
+    # one JSON string literal, so template text can never end the string or run code;
+    # the response is a script file, so the "\/" JSON adds for inline use is undone
+    my $literal = to_json("$tmplHtml") =~ s{\\([\\/])}{$1 eq '/' ? '/' : '\\\\'}ger;
+    return "\n                    let tmpl = document.createElement('template');\n"
+        . "                    tmpl.innerHTML = $literal;\n            ";
 }
 
 sub _component {
@@ -110,16 +133,16 @@ sub _component {
     my $path = $base ? $base . $route->pattern->unparsed
         : $route->pattern->unparsed;
 
+    my $params = $self->_getAllParams($c);
     if (exists($opts->{template})) {
-        my $template = defined($opts->{template}) ? $opts->{template} : 'false';
-        $c->req->params->merge(template => $template);
+        $params->param(template => defined($opts->{template}) ? $opts->{template} : 'false');
     }
 
-    my $params = $self->_getAllParams($c);
     my $paramString = $params->to_string;
     my $reqId = $opts->{requestId} || $c->req->request_id;
 
     $name .= ".js" if $name !~ m/\.js$/;
+    croak "WebComponent: invalid component name '$name'" unless $name =~ $COMPONENT_NAME;
 
     # :req/:component
     $path =~ s/:req/$reqId/;
@@ -132,10 +155,10 @@ sub _component {
 
 sub _getAllParams($self, $c) {
     my $rp = $c->req->params->to_hash;
-    %{$rp} = (%{$rp}, %{$c->stash->{'mojo.captures'}}) if $c->stash->{'mojo.captures'};
-    my $params = Mojo::Parameters->new(%{$rp});
-    delete $params->{cb}; # remove the callback routine
-    return $params;
+    # route-internal captures are not parameters of the component
+    my %captures = %{$c->stash->{'mojo.captures'} // {}};
+    delete @captures{qw(cb req component)};
+    return Mojo::Parameters->new(%{$rp}, %captures);
 }
 
 1;
@@ -444,6 +467,11 @@ plugin to skip any template processing and assume that the html content is embed
 This plugin creates a route to return the WebComponent script to the application. The default route is
 /component/:reqId/*component. The path configuration setting can be passed during initialization to modify the base
 path of the controller.
+
+The route is created when the plugin is registered and is moved ahead of the routes the application has already
+declared, so a catch-all route cannot hide it. For the same reason, a route of your own under the same path is never
+reached. Component names are file names ending in .js, optionally below sub folders (sub/my-component.js); a segment
+may not start with a dot. Any other name gets a 404, and the component helper dies when given one.
 
 =head2 /component/:reqId/*component
 
